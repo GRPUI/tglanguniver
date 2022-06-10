@@ -69,7 +69,6 @@ def testOpener(page, user_id, lang):
     test = sql.fetchone()
     sql.execute(f"SELECT test FROM {lang.capitalize()}PROGRESS WHERE user_id = ?", (user_id,))
     prevTest = sql.fetchone()[0]
-    print(test, lang)
     if test and prevTest < test[0]:
         sql.execute(f"UPDATE {lang.capitalize()}PROGRESS SET test = ? WHERE user_id = ?", (test[0], user_id))
         db.commit()
@@ -218,13 +217,10 @@ def callback(call):
 
     if str(call.data).split('tests_')[0] in ['Py', 'C', 'java', 'js', 'R', 'sql'] and str(call.data).split('tests_')[
         1] != '':
-        print(call.data)
         numTest = (str(call.data).split('_'))[1]
         lang = (str(call.data).split('tests_'))[0]
-        print(numTest, lang)
         sql.execute(f"SELECT question FROM {lang.capitalize()}Test{numTest} WHERE num = ?", (1,))
         question = sql.fetchone()[0]
-        print(question)
         answ = InlineKeyboardMarkup()
         answ.row_width = 3
         for n in range(3):
