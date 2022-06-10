@@ -23,6 +23,7 @@ sql = db.cursor()
 # создание таблицы
 
 sql.execute("""CREATE TABLE IF NOT EXISTS users (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
 user_id	INT,
 lvl	INT
 )""")
@@ -50,7 +51,8 @@ inline_page_buttons = InlineKeyboardMarkup()
 inline_page_buttons.row_width = 2
 inline_page_buttons.add(InlineKeyboardButton("Назад", callback_data='back'),
                         InlineKeyboardButton("Вперёд", callback_data='next'),
-                        InlineKeyboardButton("Главное меню", callback_data='main'))
+                        InlineKeyboardButton("Главное меню", callback_data='main'),
+                        InlineKeyboardButton("Темы", callback_data='theme'))
 inline_page_buttons.row_width = 1
 inline_page_buttons.add(InlineKeyboardButton("Тесты", callback_data='tests'))
 
@@ -101,50 +103,55 @@ def messages(message):
 
 # обработка call из inline-кнопок
 
+def insert_user(f):
+    def wrapper(*args, **kwargs):
+        call = args[0]
+
+        levels = ['newbie', 'notBad', 'master']
+        if call.data in levels:
+            sql.execute("INSERT INTO users(user_id, lvl) VALUES(?,?)", (call.from_user.id, levels.index(call.data) + 1))
+            db.commit()
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+send_start_message = {
+    'newbie': 'Хорошо! Я бы посоветовал начать с *Python*, затем *SQL*. Однако ты в праве выбирать свой путь :)',
+    'notBad': 'Хорошо! Я бы посоветовал начать с *Python*, затем *SQL*. Однако ты в праве выбирать свой путь :)',
+    'master': 'Ого, не ожидал такой встречи. Ну что ж выбирай с чем хочешь ознакомится :)'
+}
+
 
 @bot.callback_query_handler(func=lambda call: True)
+@insert_user
 def callback(call):
-    print(call.data)
-    if call.data == "newbie":
-        sql.execute("INSERT INTO users VALUES(?,?)", (call.from_user.id, 1))
-        db.commit()
-        bot.edit_message_text("Хорошо! Я бы посоветовал начать с *Python*, затем *SQL*."
-                              " Однако ты в праве выбирать свой путь :)", call.message.chat.id, call.message.id,
+    if call.data in send_start_message.keys():
+        bot.edit_message_text(send_start_message[call.data], call.message.chat.id, call.message.id,
                               reply_markup=inline_langs, parse_mode="Markdown")
-    elif call.data == "notBad":
-        sql.execute("INSERT INTO users VALUES(?,?)", (call.from_user.id, 2))
-        db.commit()
-        bot.edit_message_text("Хорошо! Я бы посоветовал начать с *Python*, затем *SQL*."
-                              " Однако ты в праве выбирать свой путь :)", call.message.chat.id, call.message.id,
-                              reply_markup=inline_langs, parse_mode="Markdown")
-    elif call.data == "master":
-        sql.execute("INSERT INTO users VALUES(?,?)", (call.from_user.id, 3))
-        db.commit()
-        bot.edit_message_text("Ого, не ожидал такой встречи. Ну что ж выбирай с чем хочешь ознакомится :)",
-                              call.message.chat.id, call.message.id, reply_markup=inline_langs, parse_mode="Markdown")
 
     if call.data in ['py', 'C', 'java', 'js', 'R', 'sql']:
         sql.execute(f'SELECT lastReaded FROM {str(call.data).capitalize()}PROGRESS WHERE user_id = ?',
                     (call.from_user.id,))
         fetch = sql.fetchone()
+
+        page, activity_column = 1, '1'
         if fetch:
             page = fetch[0]
-            sql.execute('INSERT INTO activity VALUES(?,?)',
-                        (call.from_user.id, f'{str(call.data).capitalize()}-{page}'))
-            db.commit()
-            sql.execute(f'SELECT Text FROM {str(call.data).capitalize()}Materials WHERE Page = ?', (page,))
-            Text = sql.fetchall()[0]
-            bot.edit_message_text(Text, call.message.chat.id, call.message.id, reply_markup=inline_page_buttons,
-                                  parse_mode="Markdown")
+            activity_column = f'{str(call.data).capitalize()}-{page}'
         else:
-            sql.execute(f'SELECT Text FROM {str(call.data).capitalize()}Materials WHERE Page = 1')
-            Text = sql.fetchall()[0]
-            bot.edit_message_text(Text, call.message.chat.id, call.message.id, reply_markup=inline_page_buttons,
-                                  parse_mode="Markdown")
-            sql.execute('INSERT INTO activity VALUES(?,?)', (call.from_user.id, 1))
-            db.commit()
             sql.execute(f'INSERT INTO {str(call.data).capitalize()}PROGRESS VALUES(?,?,?)', (call.from_user.id, 0, 1))
             db.commit()
+
+        sql.execute('INSERT INTO activity VALUES(?,?)', (call.from_user.id, activity_column))
+        db.commit()
+
+        sql.execute(f'SELECT Text FROM {str(call.data).capitalize()}Materials WHERE Page = ?', (page,))
+        Text = sql.fetchall()[0]
+
+        bot.edit_message_text(Text, call.message.chat.id, call.message.id, reply_markup=inline_page_buttons,
+                              parse_mode="Markdown")
+        return
 
     if call.data == 'main':
         bot.edit_message_text('Чем займёмся сейчас?', call.message.chat.id, call.message.id, reply_markup=inline_langs,
@@ -152,27 +159,26 @@ def callback(call):
         sql.execute('DELETE FROM activity WHERE user_id = ?', (call.from_user.id,))
         db.commit()
 
+        return
+
     if call.data == 'back':
         sql.execute('SELECT last_readed FROM activity WHERE user_id = ?', (call.from_user.id,))
         activity = str(sql.fetchone()[0])
         prefix = (activity.split('-'))[0]
         activity = int((activity.split('-'))[1]) - 1
-        print(prefix)
+        page = 1
         if activity != 0:
-            sql.execute(f'SELECT Text FROM {prefix.capitalize()}Materials WHERE Page = ?', (activity,))
-            Text = sql.fetchall()[0]
-            bot.edit_message_text(Text, call.message.chat.id, call.message.id, reply_markup=inline_page_buttons,
-                                  parse_mode="Markdown")
+            page = activity
             sql.execute(f'UPDATE {prefix.capitalize()}PROGRESS SET lastReaded = lastReaded-1 WHERE user_id = ?',
                         (call.from_user.id,))
             sql.execute('UPDATE activity SET last_Readed = ? WHERE user_id = ?',
                         (f'{prefix}-{activity}', call.from_user.id))
             db.commit()
-        else:
-            sql.execute(f'SELECT Text FROM {prefix.capitalize()}Materials WHERE Page = 1')
-            Text = sql.fetchall()[0]
-            bot.edit_message_text(Text, call.message.chat.id, call.message.id, reply_markup=inline_page_buttons,
-                                  parse_mode="Markdown")
+        sql.execute(f'SELECT Text FROM {prefix.capitalize()}Materials WHERE Page = ?', (page,))
+        Text = sql.fetchall()[0]
+        bot.edit_message_text(Text, call.message.chat.id, call.message.id, reply_markup=inline_page_buttons,
+                              parse_mode="Markdown")
+        return
 
     if call.data == "next":
         sql.execute('SELECT last_readed FROM activity WHERE user_id = ?', (call.from_user.id,))
@@ -193,6 +199,8 @@ def callback(call):
             db.commit()
             testOpener(activity, call.from_user.id, prefix)
 
+        return
+
     if call.data == 'tests':
         sql.execute('SELECT last_readed FROM activity WHERE user_id = ?', (call.from_user.id,))
         activity = str(sql.fetchone()[0])
@@ -205,14 +213,18 @@ def callback(call):
             tests.add(InlineKeyboardButton(f'Раздел {test}', callback_data=f'{lang}tests_{test}'))
         tests.add(InlineKeyboardButton('Главное меню', callback_data='main'))
         bot.edit_message_text('По какому разделу хочешь пройти тест?', call.message.chat.id, call.message.id,
-                              reply_markup=tests)
+                              reply_markup=tests, parse_mode="Markdown")
+        return
 
     if str(call.data).split('tests_')[0] in ['Py', 'C', 'java', 'js', 'R', 'sql'] and str(call.data).split('tests_')[
         1] != '':
+        print(call.data)
         numTest = (str(call.data).split('_'))[1]
         lang = (str(call.data).split('tests_'))[0]
+        print(numTest, lang)
         sql.execute(f"SELECT question FROM {lang.capitalize()}Test{numTest} WHERE num = ?", (1,))
         question = sql.fetchone()[0]
+        print(question)
         answ = InlineKeyboardMarkup()
         answ.row_width = 3
         for n in range(3):
@@ -222,6 +234,8 @@ def callback(call):
         bot.edit_message_text(question, call.message.chat.id, call.message.id, reply_markup=answ)
         sql.execute(f"SELECT right FROM {lang}Test{numTest} WHERE num = ?", (1,))
 
+        return
+
     if str(call.data).split('tst')[0] in ['Py', 'C', 'java', 'js', 'R', 'sql']:
         lang = (str(call.data).split('tst'))[0]
         testNum = str(call.data).split('-')[1]
@@ -229,9 +243,8 @@ def callback(call):
         ansNum = int(str(call.data).split('-')[3])
         sql.execute(f"SELECT right FROM {lang}Test{testNum} WHERE num = ?", (questionNum,))
         right = (sql.fetchone())[0]
-        print(right)
         if ansNum == right:
-            if questionNum == 3:
+            if questionNum == 5:
                 bot.edit_message_text('Всё верно! Я даже не сомневался в тебе! Так дежать!', call.message.chat.id,
                                       call.message.id, reply_markup=inline_mainMenu)
             else:
@@ -247,10 +260,49 @@ def callback(call):
         else:
             bot.answer_callback_query(callback_query_id=call.id, show_alert=False, text="Неверно :(")
 
+    if call.data == "theme" or str(call.data).startswith("module-"):
+        try:
+            call_name = 'module'
+            sql.execute('SELECT last_readed FROM activity WHERE user_id = ?', (call.from_user.id,))
+            activity = str(sql.fetchone()[0]).split('-')[0]
+            if str(call.data).startswith("module-"):
+                sql.execute(f'SELECT Theme FROM {activity}Materials WHERE Module = ? GROUP BY Theme ORDER BY Page',
+                            (str(call.data).split('-')[1],))
+                call_name = 'show'
+            else:
+                sql.execute(f'SELECT Module FROM {activity}Materials GROUP BY Module ORDER BY Page')
+            modules = sql.fetchall()
+            inline_themes = InlineKeyboardMarkup()
+            inline_lvl.row_width = 1
+            for theme in modules:
+                if theme[0] is not None:
+                    inline_themes.add(InlineKeyboardButton(text=theme[0], callback_data=f'{call_name}-{theme[0]}'))
+            inline_themes.add(InlineKeyboardButton(text="Главное меню", callback_data='main'))
+            if str(call.data).startswith("module-"):
+                bot.edit_message_text('Темы модуля:', call.message.chat.id, call.message.id, reply_markup=inline_themes)
+                return
+            bot.edit_message_text('Выберите модуль:', call.message.chat.id, call.message.id,  reply_markup=inline_themes)
+            return
+        except sqlite3.OperationalError:
+            bot.answer_callback_query(callback_query_id=call.id, show_alert=False, text="К сожалению, эта функция не доступна.")
+
+    if str(call.data).startswith('show'):
+        theme = str(call.data).split('-')[1]
+        sql.execute('SELECT last_readed FROM activity WHERE user_id = ?', (call.from_user.id,))
+        activity = str(sql.fetchone()[0]).split('-')[0]
+        sql.execute(f'SELECT Text, PAGE FROM {activity.capitalize()}Materials WHERE Theme = ?', (theme,))
+        iterable = sql.fetchone()
+        text = iterable[0]
+        page = iterable[1]
+        bot.edit_message_text(text, call.message.chat.id, call.message.id, reply_markup=inline_page_buttons,
+                              parse_mode="Markdown")
+        sql.execute(f'UPDATE activity SET last_Readed = ? WHERE user_id = ?', (f'{activity}-{page}', call.from_user.id))
+        sql.execute(f'UPDATE {activity.capitalize()}PROGRESS SET lastReaded = ? WHERE user_id = ?',
+                    (page, call.from_user.id))
+        db.commit()
+
 
 # проверка если код запущен напрямую
-
-
 if __name__ == '__main__':
     # бесконечная провека сообщений
     bot.infinity_polling()
