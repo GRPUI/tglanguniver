@@ -77,8 +77,8 @@ def testOpener(page, user_id, lang):
 # обработка команды start
 
 
-@bot.message_handler(commands='start')
-def mainMenu(message):
+@bot.message_handler(commands=['start', ])
+def start(message):
     sql.execute("SELECT user_id FROM users WHERE user_id = ?", (message.from_user.id,))
     check = sql.fetchall()
     if not check:
@@ -277,10 +277,11 @@ def callback(call):
             if str(call.data).startswith("module-"):
                 bot.edit_message_text('Темы модуля:', call.message.chat.id, call.message.id, reply_markup=inline_themes)
                 return
-            bot.edit_message_text('Выберите модуль:', call.message.chat.id, call.message.id,  reply_markup=inline_themes)
+            bot.edit_message_text('Выберите модуль:', call.message.chat.id, call.message.id, reply_markup=inline_themes)
             return
         except sqlite3.OperationalError:
-            bot.answer_callback_query(callback_query_id=call.id, show_alert=False, text="К сожалению, эта функция не доступна.")
+            bot.answer_callback_query(callback_query_id=call.id, show_alert=False,
+                                      text="К сожалению, эта функция не доступна.")
 
     if str(call.data).startswith('show'):
         theme = str(call.data).split('-')[1]
