@@ -34,7 +34,8 @@ def get_menu():
     return types.InlineKeyboardMarkup().row(
         types.InlineKeyboardButton("Назад", callback_data=cb.new(action='back')),
         types.InlineKeyboardButton("Вперёд", callback_data=cb.new(action='next'))
-    ).row(types.InlineKeyboardButton("Меню", callback_data=cb.new(action='menu')))
+    ).row(types.InlineKeyboardButton("Меню", callback_data=cb.new(action='menu'))
+          ).row(types.InlineKeyboardButton("Темы", callback_data=cb.new(action='topic')))
 
 
 def progress_checker(progress, lang):
@@ -47,6 +48,11 @@ def progress_checker(progress, lang):
 def content_getter(language, page):
     text = sql.execute(f"SELECT text FROM {language}_content WHERE id = {page}").fetchone()[0]
     return text
+
+
+def topic_getter(lang):
+    return sql.execute(f'SELECT theme FROM {lang}_content GROUP BY theme ORDER BY id').fetchall(), sql.execute(
+        f'SELECT id FROM {lang}_content GROUP BY theme ORDER BY id').fetchall()
 
 
 @dp.message_handler(commands=['start', 'help'])
@@ -75,7 +81,7 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
                             (int(query.from_user.id), f"{callback_data_action}-1;", callback_data_action))
             else:
                 sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
-                            (progress[0]+f"{callback_data_action}-1;", callback_data_action, query.from_user.id))
+                            (progress[0] + f"{callback_data_action}-1;", callback_data_action, query.from_user.id))
             db.commit()
         else:
             page = int(str(name).split("-")[1])
@@ -115,6 +121,33 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
                                     query.message.message_id,
                                     parse_mode="Markdown",
                                     reply_markup=get_menu())
+    if callback_data_action == "topic":
+        language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (query.from_user.id,)).fetchone()[0]
+        topic_list = list(map(lambda x: x[0], topic_getter(language)[0]))
+        topic_ids = list(map(lambda x: x[0], topic_getter(language)[1]))
+        topic_inline = types.InlineKeyboardMarkup()
+        for count in range(len(topic_ids)):
+            topic, ids = topic_list[count], topic_ids[count]
+            topic_inline.row(types.InlineKeyboardButton(topic, callback_data=cb.new(action=f'topic-{ids}')))
+        await bot.edit_message_text("Темы:",
+                                    query.from_user.id,
+                                    query.message.message_id,
+                                    parse_mode="Markdown",
+                                    reply_markup=topic_inline)
+    if callback_data_action.startswith("topic-"):
+        language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (query.from_user.id,)).fetchone()[0]
+        text = content_getter(language, callback_data_action.split('-')[1])
+        await bot.edit_message_text(text,
+                                    query.from_user.id,
+                                    query.message.message_id,
+                                    parse_mode="Markdown",
+                                    reply_markup=get_menu())
+        progress = sql.execute("SELECT progress FROM users WHERE id = ?", (query.from_user.id,)).fetchone()
+        name = progress_checker(progress, language)
+        progress = str(progress[0]).replace(name, f'{language}-{callback_data_action.split("-")[1]}')
+        sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
+                    (progress, language, query.from_user.id))
+        db.commit()
 
 
 @dp.errors_handler(exception=MessageNotModified)
