@@ -184,9 +184,10 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
         await bot.edit_message_text("Введите ключевое слово: ", user_id,
                                     query.message.message_id, reply_markup=get_menu())
 
-@dp.message_handler(content_types=ContentType.Text)
+
+@dp.message_handler()
 async def send_search(message: types.Message):
-    indexes = searcher(message.text)
+    indexes = searcher(str(message.text).lower())
     language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (message.from_user.id,)).fetchone()[0]
     if not indexes:
         await message.answer("Ничего не найдено")
@@ -196,8 +197,8 @@ async def send_search(message: types.Message):
     for index in indexes:
         topic = sql.execute(f"SELECT theme FROM {language}_content WHERE id = ?", (index,)).fetchone()[0]
         topics.append(topic)
-    for count in len(indexes):
-        topic, ids = topic_list[count], topic_ids[count]
+    for count in range(len(indexes)):
+        topic, ids = topics[count], indexes[count]
         topic_inline.row(types.InlineKeyboardButton(topic, callback_data=cb.new(action=f'topic-{ids}')))
     await message.answer(f"Вот что найдено по запросу: {message.text}", reply_markup=topic_inline)
 
