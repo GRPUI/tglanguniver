@@ -148,6 +148,7 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
                     (progress, language, query.from_user.id))
         db.commit()
     if callback_data_action == "to_text":
+        progress = sql.execute("SELECT progress FROM users WHERE id = ?", (query.from_user.id,)).fetchone()
         language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (query.from_user.id,)).fetchone()[0]
         name = progress_checker(progress, language)
         page = int(str(name).split("-")[1])
