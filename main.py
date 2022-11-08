@@ -34,8 +34,7 @@ def get_menu():
     return types.InlineKeyboardMarkup().row(
         types.InlineKeyboardButton("Назад", callback_data=cb.new(action='back')),
         types.InlineKeyboardButton("Вперёд", callback_data=cb.new(action='next'))
-    ).row(types.InlineKeyboardButton("Меню", callback_data=cb.new(action='menu'))
-          ).row(types.InlineKeyboardButton("Темы", callback_data=cb.new(action='topic')))
+    ).row(types.InlineKeyboardButton("Темы", callback_data=cb.new(action='topic'))).row(types.InlineKeyboardButton("Меню", callback_data=cb.new(action='menu')))
 
 
 def progress_checker(progress, lang):
@@ -64,7 +63,6 @@ async def send_welcome(message: types.Message):
 
 @dp.callback_query_handler(cb.filter())
 async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, str]):
-    logging.info('Got this callback data: %r', callback_data)
     await query.answer()
     callback_data_action = callback_data['action']
     if callback_data_action in ["python", "sql", "cpp", "csharp"]:
@@ -129,6 +127,7 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
         for count in range(len(topic_ids)):
             topic, ids = topic_list[count], topic_ids[count]
             topic_inline.row(types.InlineKeyboardButton(topic, callback_data=cb.new(action=f'topic-{ids}')))
+        topic_inline.row(types.InlineKeyboardButton("К тексту 🔙", callback_data=cb.new(action='to_text')))
         await bot.edit_message_text("Темы:",
                                     query.from_user.id,
                                     query.message.message_id,
@@ -148,6 +147,16 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
         sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
                     (progress, language, query.from_user.id))
         db.commit()
+    if callback_data_action == "to_text":
+        language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (query.from_user.id,)).fetchone()[0]
+        name = progress_checker(progress, language)
+        page = int(str(name).split("-")[1])
+        text = content_getter(language, page)
+        await bot.edit_message_text(text,
+                                    query.from_user.id,
+                                    query.message.message_id,
+                                    parse_mode="Markdown",
+                                    reply_markup=get_menu())
 
 
 @dp.errors_handler(exception=MessageNotModified)
