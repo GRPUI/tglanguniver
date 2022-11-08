@@ -55,7 +55,8 @@ def get_menu():
         types.InlineKeyboardButton("Назад", callback_data=cb.new(action='back')),
         types.InlineKeyboardButton("Вперёд", callback_data=cb.new(action='next'))
     ).row(types.InlineKeyboardButton("Темы", callback_data=cb.new(action='topic'))).row(
-        types.InlineKeyboardButton("Меню", callback_data=cb.new(action='menu')))
+        types.InlineKeyboardButton("Меню", callback_data=cb.new(action='menu'))).row(
+        types.InlineKeyboardButton("Поиск", callback_data=cb.new(action='search')))
 
 
 def progress_checker(progress, lang):
