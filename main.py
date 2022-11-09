@@ -1,24 +1,34 @@
 import logging
 import typing
-import sqlite3
+import aiosqlite
 import re
+
+from functools import lru_cache
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils.callback_data import CallbackData
 from aiogram.utils.exceptions import MessageNotModified
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.dispatcher import FSMContext
 
 API_TOKEN = '5357001066:AAFCgaB4DnaQxDHpIH_7Dia7-5DVTGO8H-0'
 
-db = sqlite3.connect('database.db', check_same_thread=False)
-sql = db.cursor()
+# db = sqlite3.connect('database.db', check_same_thread=False)
+# sql = db.cursor()
 
 logging.basicConfig(level=logging.INFO)
 
+storage = MemoryStorage()
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher(bot, storage=storage)
 
 cb = CallbackData('language', 'action')
+
+
+class Search(StatesGroup):
+    request = State()
 
 
 def standardization(text):
@@ -26,8 +36,11 @@ def standardization(text):
     return text
 
 
-def searcher(word):
-    all_info = sql.execute('SELECT text, id FROM python_content')
+async def searcher(language, word):
+    global sql
+    result = await sql.execute(f'SELECT text, id FROM {language}_content')
+    all_info = await result.fetchall()
+
     info = list(map(lambda x: x[0], all_info))
     ids = list(map(lambda x: x[1], all_info))
     matches = []
@@ -50,6 +63,7 @@ def get_languages():
     )
 
 
+@lru_cache()
 def get_menu():
     return types.InlineKeyboardMarkup().row(
         types.InlineKeyboardButton("Назад", callback_data=cb.new(action='back')),
@@ -59,6 +73,12 @@ def get_menu():
         types.InlineKeyboardButton("Поиск", callback_data=cb.new(action='search')))
 
 
+@lru_cache()
+def search_refuce():
+    return types.InlineKeyboardMarkup().row(
+        types.InlineKeyboardButton("Отмена", callback_data=cb.new(action="search_refuce")))
+
+
 def progress_checker(progress, lang):
     for name in progress[0].split(';'):
         if lang in name:
@@ -66,14 +86,17 @@ def progress_checker(progress, lang):
     return False
 
 
-def content_getter(language, page):
-    text = sql.execute(f"SELECT text FROM {language}_content WHERE id = {page}").fetchone()[0]
-    return text
+async def content_getter(language, page):
+    global sql
+    text = await (await sql.execute(f"SELECT text FROM {language}_content WHERE id = {page}")).fetchone()
+    return text[0]
 
 
-def topic_getter(lang):
-    return sql.execute(f'SELECT theme FROM {lang}_content GROUP BY theme ORDER BY id').fetchall(), sql.execute(
-        f'SELECT id FROM {lang}_content GROUP BY theme ORDER BY id').fetchall()
+async def topic_getter(lang):
+    global sql
+    return await (await sql.execute(f'SELECT theme FROM {lang}_content GROUP BY theme ORDER BY id')).fetchall(), await (
+        await sql.execute(
+            f'SELECT id FROM {lang}_content GROUP BY theme ORDER BY id')).fetchall()
 
 
 @dp.message_handler(commands=['start', 'help'])
@@ -83,32 +106,33 @@ async def send_welcome(message: types.Message):
                          reply_markup=get_languages())
 
 
-@dp.callback_query_handler(cb.filter())
-async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, str]):
+@dp.callback_query_handler(cb.filter(), state="*")
+async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, str], state: FSMContext):
+    global sql, db
     await query.answer()
     user_id = query.from_user.id
     callback_data_action = callback_data['action']
     if callback_data_action in ["python", "sql", "cpp", "csharp"]:
-        progress = sql.execute("SELECT progress FROM users WHERE id = ?", (user_id,)).fetchone()
+        progress = await (await sql.execute("SELECT progress FROM users WHERE id = ?", (user_id,))).fetchone()
         name = None
         if progress:
             name = progress_checker(progress, callback_data_action)
         text = ''
         page = 1
         if not progress or name is False:
-            text = content_getter(callback_data_action, page)
+            text = await content_getter(callback_data_action, page)
             if not progress:
-                sql.execute("INSERT INTO users(id, progress, last_opened) VALUES(?,?,?)",
-                            (int(user_id), f"{callback_data_action}-1;", callback_data_action))
+                await sql.execute("INSERT INTO users(id, progress, last_opened) VALUES(?,?,?)",
+                                  (int(user_id), f"{callback_data_action}-1;", callback_data_action))
             else:
-                sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
-                            (progress[0] + f"{callback_data_action}-1;", callback_data_action, user_id))
-            db.commit()
+                await sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
+                                  (progress[0] + f"{callback_data_action}-1;", callback_data_action, user_id))
+            await db.commit()
         else:
             page = int(str(name).split("-")[1])
-            text = content_getter(callback_data_action, page)
-            sql.execute("UPDATE users SET last_opened = ? WHERE id = ?", (callback_data_action, user_id))
-            db.commit()
+            text = await content_getter(callback_data_action, page)
+            await sql.execute("UPDATE users SET last_opened = ? WHERE id = ?", (callback_data_action, user_id))
+            await db.commit()
         await bot.edit_message_text(text,
                                     user_id,
                                     query.message.message_id,
@@ -122,30 +146,37 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
                                     parse_mode="Markdown",
                                     reply_markup=get_languages())
     if callback_data_action in ["back", "next"]:
-        progress = sql.execute("SELECT progress FROM users WHERE id = ?", (user_id,)).fetchone()
-        language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (user_id,)).fetchone()[0]
+        progress = await (await sql.execute("SELECT progress FROM users WHERE id = ?", (user_id,))).fetchone()
+        language = await (await sql.execute("SELECT last_opened FROM users WHERE id = ?", (user_id,))).fetchone()
+        language = language[0]
         name = progress_checker(progress, language)
         page = int(str(name).split("-")[1])
+
+        page_count = await (await sql.execute(f"SELECT COUNT(*) FROM {language}_content")).fetchone()
+        page_count = page_count[0]
+
         if callback_data_action == "back":
             if page == 1:
                 return
             new_page = page - 1
-        elif page < sql.execute(f"SELECT COUNT(*) FROM {language}_content").fetchone()[0]:
+        elif page < page_count:
             new_page = page + 1
         progress = str(progress[0]).replace(name, f'{language}-{new_page}')
-        sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
-                    (progress, language, user_id))
-        db.commit()
-        text = content_getter(language, new_page)
+        await sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
+                          (progress, language, user_id))
+        await db.commit()
+        text = await content_getter(language, new_page)
         await bot.edit_message_text(text,
                                     user_id,
                                     query.message.message_id,
                                     parse_mode="Markdown",
                                     reply_markup=get_menu())
     if callback_data_action == "topic":
-        language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (user_id,)).fetchone()[0]
-        topic_list = list(map(lambda x: x[0], topic_getter(language)[0]))
-        topic_ids = list(map(lambda x: x[0], topic_getter(language)[1]))
+        language = await (await sql.execute("SELECT last_opened FROM users WHERE id = ?", (user_id,))).fetchone()
+        language = language[0]
+        topics = await topic_getter(language)
+        topic_list = list(map(lambda x: x[0], topics[0]))
+        topic_ids = list(map(lambda x: x[0], topics[1]))
         topic_inline = types.InlineKeyboardMarkup()
         for count in range(len(topic_ids)):
             topic, ids = topic_list[count], topic_ids[count]
@@ -157,25 +188,30 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
                                     parse_mode="Markdown",
                                     reply_markup=topic_inline)
     if callback_data_action.startswith("topic-"):
-        language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (user_id,)).fetchone()[0]
-        text = content_getter(language, callback_data_action.split('-')[1])
+        language = await (await sql.execute("SELECT last_opened FROM users WHERE id = ?", (user_id,))).fetchone()
+        language = language[0]
+        text = await content_getter(language, callback_data_action.split('-')[1])
         await bot.edit_message_text(text,
                                     user_id,
                                     query.message.message_id,
                                     parse_mode="Markdown",
                                     reply_markup=get_menu())
-        progress = sql.execute("SELECT progress FROM users WHERE id = ?", (user_id,)).fetchone()
+        progress = await (await sql.execute("SELECT progress FROM users WHERE id = ?", (user_id,))).fetchone()
         name = progress_checker(progress, language)
         progress = str(progress[0]).replace(name, f'{language}-{callback_data_action.split("-")[1]}')
-        sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
-                    (progress, language, user_id))
-        db.commit()
-    if callback_data_action == "to_text":
-        progress = sql.execute("SELECT progress FROM users WHERE id = ?", (user_id,)).fetchone()
-        language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (user_id,)).fetchone()[0]
+        await sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
+                          (progress, language, user_id))
+        await db.commit()
+    if callback_data_action in ["to_text", "search_refuce"]:
+        current_state = await state.get_state()
+        if current_state:
+            await state.finish()
+        progress = await (await sql.execute("SELECT progress FROM users WHERE id = ?", (user_id,))).fetchone()
+        language = await (await sql.execute("SELECT last_opened FROM users WHERE id = ?", (user_id,))).fetchone()
+        language = language[0]
         name = progress_checker(progress, language)
         page = int(str(name).split("-")[1])
-        text = content_getter(language, page)
+        text = await content_getter(language, page)
         await bot.edit_message_text(text,
                                     user_id,
                                     query.message.message_id,
@@ -183,20 +219,25 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
                                     reply_markup=get_menu())
     if callback_data_action == "search":
         await bot.edit_message_text("Введите ключевое слово: ", user_id,
-                                    query.message.message_id, reply_markup=get_menu())
+                                    query.message.message_id, reply_markup=search_refuce())
+        await Search.request.set()
 
 
-@dp.message_handler()
+@dp.message_handler(state=Search.request)
 async def send_search(message: types.Message):
-    indexes = searcher(str(message.text).lower())
-    language = sql.execute("SELECT last_opened FROM users WHERE id = ?", (message.from_user.id,)).fetchone()[0]
+    global sql, db
+    language = await (
+        await sql.execute("SELECT last_opened FROM users WHERE id = ?", (message.from_user.id,))).fetchone()
+    language = language[0]
+    indexes = await searcher(language, str(message.text).lower())
     if not indexes:
         await message.answer("Ничего не найдено")
         return
     topics = []
     topic_inline = types.InlineKeyboardMarkup()
     for index in indexes:
-        topic = sql.execute(f"SELECT theme FROM {language}_content WHERE id = ?", (index,)).fetchone()[0]
+        topic = await (await sql.execute(f"SELECT theme FROM {language}_content WHERE id = ?", (index,))).fetchone()
+        topic = topic[0]
         topics.append(topic)
     for count in range(len(indexes)):
         topic, ids = topics[count], indexes[count]
@@ -209,5 +250,11 @@ async def message_not_modified_handler(update, error):
     return True
 
 
+async def on_startup(dp: Dispatcher):
+    global sql, db
+    db = await aiosqlite.connect('database.db', check_same_thread=False)
+    sql = await db.cursor()
+
+
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
