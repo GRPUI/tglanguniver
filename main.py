@@ -101,6 +101,9 @@ async def topic_getter(lang):
 
 @dp.message_handler(commands=['start', 'help'])
 async def send_welcome(message: types.Message):
+    current_state = await state.get_state()
+    if current_state:
+        await state.finish()
     await message.answer('Приветствую! Я бот для изучения языков программирования и не только\n'
                          'Выбирай язык из списка ниже :)',
                          reply_markup=get_languages())
