@@ -46,9 +46,10 @@ async def searcher(language, word):
     matches = []
     for _id, page in enumerate(info):
         page = standardization(page).lower().split(" ")
+        page = [x for x in page if len(x) > 1]
         a = process.extractOne(word, page)
         percent = a[1]
-        if percent in range(70, 90) or percent > 90:
+        if percent in range(70, 101):
             matches.append(_id + 1)
     if not matches:
         return False
@@ -103,9 +104,6 @@ async def topic_getter(lang):
 
 @dp.message_handler(commands=['start', 'help'])
 async def send_welcome(message: types.Message):
-    current_state = await state.get_state()
-    if current_state:
-        await state.finish()
     await message.answer('Приветствую! Я бот для изучения языков программирования и не только\n'
                          'Выбирай язык из списка ниже :)',
                          reply_markup=get_languages())
