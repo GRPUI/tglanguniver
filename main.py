@@ -48,7 +48,7 @@ async def searcher(language, word):
         page = standardization(page).lower().split(" ")
         a = process.extractOne(word, page)
         percent = a[1]
-        if percent in range(70, 90) or percent == 100:
+        if percent in range(70, 90) or percent > 90:
             matches.append(_id + 1)
     if not matches:
         return False
