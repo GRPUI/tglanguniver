@@ -2,6 +2,8 @@ import logging
 import typing
 import aiosqlite
 import re
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
 
 from functools import lru_cache
 
@@ -40,13 +42,13 @@ async def searcher(language, word):
     global sql
     result = await sql.execute(f'SELECT text, id FROM {language}_content')
     all_info = await result.fetchall()
-
     info = list(map(lambda x: x[0], all_info))
-    ids = list(map(lambda x: x[1], all_info))
     matches = []
     for _id, page in enumerate(info):
-        page = standardization(page).lower()
-        if word in str(page).split(" "):
+        page = standardization(page).lower().split(" ")
+        a = process.extractOne(word, page)
+        percent = a[1]
+        if percent in range(70, 90) or percent == 100:
             matches.append(_id + 1)
     if not matches:
         return False
@@ -74,9 +76,9 @@ def get_menu():
 
 
 @lru_cache()
-def search_refuce():
+def search_refuse():
     return types.InlineKeyboardMarkup().row(
-        types.InlineKeyboardButton("Отмена", callback_data=cb.new(action="search_refuce")))
+        types.InlineKeyboardButton("Отмена", callback_data=cb.new(action="search_refuse")))
 
 
 def progress_checker(progress, lang):
@@ -205,7 +207,7 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
         await sql.execute("UPDATE users SET progress = ?, last_opened = ? WHERE id = ?",
                           (progress, language, user_id))
         await db.commit()
-    if callback_data_action in ["to_text", "search_refuce"]:
+    if callback_data_action in ["to_text", "search_refuse"]:
         current_state = await state.get_state()
         if current_state:
             await state.finish()
@@ -222,7 +224,7 @@ async def callback(query: types.CallbackQuery, callback_data: typing.Dict[str, s
                                     reply_markup=get_menu())
     if callback_data_action == "search":
         await bot.edit_message_text("Введите ключевое слово: ", user_id,
-                                    query.message.message_id, reply_markup=search_refuce())
+                                    query.message.message_id, reply_markup=search_refuse())
         await Search.request.set()
 
 

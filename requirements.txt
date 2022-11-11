@@ -1,2 +1,4 @@
-aiogram
-aiosqlite
+aiogram~=2.23.1
+aiosqlite~=0.17.0
+
+fuzzywuzzy~=0.18.0
